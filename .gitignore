@@ -41,6 +41,7 @@ env/
 Claude.md
 CLAUDE.md
 DEVELOPMENT_GUIDE.md
+doc/
 
 # Logs
 *.log
