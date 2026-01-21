@@ -1,7 +1,7 @@
 ## MSSQL-MCP-SERVER
 Claude AI가 MSSQL 데이터베이스의 데이터를 읽고 분석할 수 있도록 하는 MCP 서버이다.
 
-## 시스템 아키텍처
+시스템 아키텍처
 
 ```
 Claude AI (클라이언트)
@@ -20,7 +20,7 @@ MSSQL Database
 ```
 
 
-### 의존성
+의존성
 
 ```txt
 # requirements.txt
@@ -47,7 +47,7 @@ new-item mssql_server.py
 .venv\Scripts\activate
 ```
 
-### 환경 변수
+환경 변수
 
 ```bash
 # .env
