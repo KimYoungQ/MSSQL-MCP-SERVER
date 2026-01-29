@@ -353,6 +353,164 @@ async def execute_confirmed_query(database: str, query_hash: str) -> str:
     return "\n".join(result)
 
 
+@mcp.tool()
+async def list_stored_procedures(database: str) -> str:
+    """List all stored procedures in a database.
+
+    Args:
+        database: Database name (e.g., school, testdb)
+    """
+    data = await api_client.get(f"/databases/{database}/stored-procedures")
+
+    if not data or "error" in data:
+        return f"Failed to list stored procedures: {format_error(data)}"
+
+    procedures = data.get("procedures", [])
+    count = data.get("count", len(procedures))
+
+    if not procedures:
+        return f"No stored procedures found in database '{database}'."
+
+    result = [f"Database: {database}", f"Stored procedure count: {count}", "", "Stored Procedures:"]
+    for proc in procedures:
+        name = proc.get("name", "Unknown")
+        created = proc.get("created", "N/A")
+        last_altered = proc.get("lastAltered", "N/A")
+        result.append(f"  - {name}")
+        result.append(f"      Created: {created}")
+        result.append(f"      Last Altered: {last_altered}")
+
+    return "\n".join(result)
+
+
+@mcp.tool()
+async def get_stored_procedure_definition(database: str, procedure: str) -> str:
+    """Get the definition (source code) of a stored procedure.
+
+    Args:
+        database: Database name
+        procedure: Stored procedure name
+    """
+    data = await api_client.get(f"/databases/{database}/stored-procedures/{procedure}/definition")
+
+    if not data or "error" in data:
+        return f"Failed to get stored procedure definition: {format_error(data)}"
+
+    definition = data.get("definition")
+
+    if not definition:
+        return f"No definition found for stored procedure '{procedure}' in database '{database}'. (The definition may be encrypted or inaccessible)"
+
+    result = [
+        f"=== Stored Procedure Definition ===",
+        f"Database: {database}",
+        f"Procedure: {procedure}",
+        "",
+        "Definition:",
+        definition
+    ]
+
+    return "\n".join(result)
+
+
+@mcp.tool()
+async def get_stored_procedure_parameters(database: str, procedure: str) -> str:
+    """Get parameter information for a stored procedure.
+
+    Args:
+        database: Database name
+        procedure: Stored procedure name
+    """
+    data = await api_client.get(f"/databases/{database}/stored-procedures/{procedure}/parameters")
+
+    if not data or "error" in data:
+        return f"Failed to get stored procedure parameters: {format_error(data)}"
+
+    parameters = data.get("parameters", [])
+
+    result = [
+        f"=== Stored Procedure Parameters ===",
+        f"Database: {database}",
+        f"Procedure: {procedure}",
+        f"Parameter count: {len(parameters)}",
+        ""
+    ]
+
+    if not parameters:
+        result.append("This stored procedure has no parameters.")
+    else:
+        result.append("Parameters:")
+        for param in parameters:
+            name = param.get("name", "Unknown")
+            data_type = param.get("type", "unknown")
+            mode = param.get("mode", "IN")
+            max_length = param.get("maxLength")
+
+            type_info = data_type
+            if max_length:
+                type_info += f"({max_length})"
+
+            result.append(f"  - {name}: {type_info} ({mode})")
+
+    return "\n".join(result)
+
+
+@mcp.tool()
+async def get_stored_procedure_info(database: str, procedure: str) -> str:
+    """Get complete information for a stored procedure (definition + parameters).
+
+    Args:
+        database: Database name
+        procedure: Stored procedure name
+    """
+    data = await api_client.get(f"/databases/{database}/stored-procedures/{procedure}")
+
+    if not data or "error" in data:
+        return f"Failed to get stored procedure info: {format_error(data)}"
+
+    proc_name = data.get("procedure", procedure)
+    created = data.get("created", "N/A")
+    last_altered = data.get("lastAltered", "N/A")
+    definition = data.get("definition")
+    parameters = data.get("parameters", [])
+
+    result = [
+        f"=== Stored Procedure Info ===",
+        f"Database: {database}",
+        f"Procedure: {proc_name}",
+        f"Created: {created}",
+        f"Last Altered: {last_altered}",
+        ""
+    ]
+
+    # Parameters section
+    result.append(f"Parameters ({len(parameters)}):")
+    if not parameters:
+        result.append("  (No parameters)")
+    else:
+        for param in parameters:
+            name = param.get("name", "Unknown")
+            data_type = param.get("type", "unknown")
+            mode = param.get("mode", "IN")
+            max_length = param.get("maxLength")
+
+            type_info = data_type
+            if max_length:
+                type_info += f"({max_length})"
+
+            result.append(f"  - {name}: {type_info} ({mode})")
+
+    # Definition section
+    result.append("")
+    result.append("Definition:")
+    if definition:
+        result.append(definition)
+    else:
+        result.append("  (Definition not available - may be encrypted or inaccessible)")
+
+    return "\n".join(result)
+
+
 def main():
     # Run MCP server with stdio transport
     mcp.run(transport="stdio")
