@@ -511,6 +511,151 @@ async def get_stored_procedure_info(database: str, procedure: str) -> str:
     return "\n".join(result)
 
 
+@mcp.tool()
+async def preview_stored_procedure_execution(
+    database: str,
+    procedure: str,
+    parameters: str = "{}"
+) -> str:
+    """Preview a stored procedure execution before running. User must approve before execution.
+
+    Args:
+        database: Database name
+        procedure: Stored procedure name
+        parameters: JSON string of parameters (e.g., '{"@param1": "value1", "@param2": 123}')
+    """
+    # JSON 파싱 시도
+    try:
+        params_dict = json.loads(parameters) if parameters else {}
+    except json.JSONDecodeError:
+        return f"Error: Invalid JSON format for parameters. Expected format: {{'@param1': 'value1', '@param2': 123}}"
+
+    # SP 실행 명령 생성
+    if params_dict:
+        param_list = ", ".join([f"{k} = {repr(v) if isinstance(v, str) else v}" for k, v in params_dict.items()])
+        exec_command = f"EXEC [{procedure}] {param_list}"
+    else:
+        exec_command = f"EXEC [{procedure}]"
+
+    # Preview 저장
+    preview = query_preview_store.store(
+        database=database,
+        query=exec_command,
+        query_type="EXEC_SP",
+        context={
+            "procedure": procedure,
+            "parameters": params_dict
+        }
+    )
+
+    result = [
+        "=== STORED PROCEDURE EXECUTION PREVIEW ===",
+        f"Database: {database}",
+        f"Procedure: {procedure}",
+        ""
+    ]
+
+    if params_dict:
+        result.append("Parameters:")
+        for key, value in params_dict.items():
+            result.append(f"  {key} = {value}")
+        result.append("")
+
+    result.extend([
+        "SQL to be executed:",
+        exec_command,
+        "",
+        "Operation: EXECUTE STORED PROCEDURE",
+        "⚠️  WARNING: This will execute the stored procedure and may modify data.",
+        "",
+        f'To execute, use query_hash: "{preview.query_hash}"',
+        "This preview expires in 5 minutes."
+    ])
+
+    return "\n".join(result)
+
+
+@mcp.tool()
+async def execute_confirmed_stored_procedure(database: str, query_hash: str) -> str:
+    """Execute a previously previewed and approved stored procedure.
+
+    Args:
+        database: Database name
+        query_hash: The query_hash from a previous preview (16 character hash)
+    """
+    # 미리보기 검증 및 조회
+    preview, error = query_preview_store.validate_and_get(query_hash, database)
+
+    if error:
+        return f"Error: {error}"
+
+    # SP 실행 타입인지 확인
+    if preview.query_type != "EXEC_SP":
+        return f"Error: This query hash is for a {preview.query_type} query, not a stored procedure execution."
+
+    # API Gateway를 통해 SP 실행
+    procedure = preview.context.get("procedure")
+    parameters = preview.context.get("parameters", {})
+
+    payload = {
+        "procedure": procedure,
+        "parameters": parameters
+    }
+
+    data = await api_client.post(f"/databases/{database}/stored-procedures/execute", payload)
+
+    # 사용된 미리보기 삭제
+    query_preview_store.remove(query_hash)
+
+    if not data or "error" in data:
+        return f"Failed to execute stored procedure: {format_error(data)}"
+
+    # 결과 포맷팅
+    result = [
+        "=== STORED PROCEDURE EXECUTED ===",
+        f"Database: {database}",
+        f"Procedure: {procedure}",
+        ""
+    ]
+
+    if parameters:
+        result.append("Parameters:")
+        for key, value in parameters.items():
+            result.append(f"  {key} = {value}")
+        result.append("")
+
+    # Return values or result sets
+    return_value = data.get("returnValue")
+    result_sets = data.get("resultSets", [])
+    output_params = data.get("outputParameters", {})
+    rows_affected = data.get("rowsAffected")
+
+    if return_value is not None:
+        result.append(f"Return Value: {return_value}")
+
+    if rows_affected is not None:
+        result.append(f"Rows Affected: {rows_affected}")
+
+    if output_params:
+        result.append("")
+        result.append("Output Parameters:")
+        for key, value in output_params.items():
+            result.append(f"  {key} = {value}")
+
+    if result_sets:
+        result.append("")
+        result.append(f"Result Sets: {len(result_sets)}")
+        for i, rs in enumerate(result_sets, 1):
+            rows = rs.get("rows", [])
+            result.append(f"\nResult Set {i}: {len(rows)} row(s)")
+            if rows:
+                result.append(format_rows(rows, max_display=10))
+    elif not return_value and not output_params and not rows_affected:
+        result.append("Stored procedure executed successfully (no output).")
+
+    return "\n".join(result)
+
+
 def main():
     # Run MCP server with stdio transport
     mcp.run(transport="stdio")
